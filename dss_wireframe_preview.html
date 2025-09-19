@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DSS Wireframe – Preview</title>
+    <!-- Twind (Tailwind-in-JS) shim to make utility classes work without a build step -->
+    <script src="https://cdn.jsdelivr.net/npm/twind/shim@1.0.0/shim.min.js"></script>
+    <!-- React 18 + ReactDOM (UMD) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for in-browser JSX transform (dev/preview only) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body { background: white; }
+      /* basic reset for buttons/inputs to look neat without Tailwind build */
+      button { cursor: pointer; }
+      input, select, button { font: inherit; }
+    </style>
+  </head>
+  <body class="bg-white min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useMemo, useEffect } = React;
+
+      // ==================================================
+      // Data & Config
+      // ==================================================
+      const DISTRICTS = [
+        "Ahmednagar","Akola","Amravati","Aurangabad","Beed","Bhandara","Buldhana",
+        "Chandrapur","Dhule","Gadchiroli","Gondia","Hingoli","Jalgaon","Jalna",
+        "Kolhapur","Latur","Mumbai City","Mumbai Suburban","Nagpur","Nanded",
+        "Nandurbar","Nashik","Osmanabad","Palghar","Parbhani","Pune","Raigad",
+        "Ratnagiri","Sangli","Satara","Sindhudurg","Solapur","Thane","Wardha",
+        "Washim","Yavatmal"
+      ];
+
+      const SCHEMES = ["SMAM","PoCRA","SHC"];
+      const CRITERIA_BY_SCHEME = {
+        SMAM: ["CHCs registered","Machinery Procured","Financial Assistance Sanctioned"],
+        PoCRA: ["Applications Approved","Shadenets Set Up","Funds Sanctioned"],
+        SHC: ["Samples Tested","Cards Generated","Nutrient Deficiency Prevalence"],
+      };
+
+      const OFFICER_TYPES = ["AAO","DAO","CAO","TAO"];
+
+      const STATUS_DEFAULTS = {
+        "Applications Approved": "met",
+        "Shadenets Set Up": "not_met",
+        "Funds Sanctioned": "met",
+        "CHCs registered": "met",
+        "Machinery Procured": "not_met",
+        "Financial Assistance Sanctioned": "met",
+        "Samples Tested": "met",
+        "Cards Generated": "met",
+        "Nutrient Deficiency Prevalence": "not_met",
+      };
+
+      // Dummy login creds
+      const DEMO_PHONE = "9811920561";
+      const DEMO_OTP = "123456";
+
+      // ==================================================
+      // Small UI helpers
+      // ==================================================
+      function Chip({ children }) {
+        return (
+          <span className="px-2 py-1 rounded-full text-xs bg-gray-100 border text-gray-700">
+            {children}
+          </span>
+        );
+      }
+
+      function SectionCard({ title, children, className = "" }) {
+        return (
+          <div className={\`border rounded-2xl bg-white \${className}\`}>
+            {title ? (
+              <div className="px-6 py-4 border-b">
+                <h3 className="text-lg font-semibold">{title}</h3>
+              </div>
+            ) : null}
+            <div className="p-6">{children}</div>
+          </div>
+        );
+      }
+
+      function ToggleGroup({ value, onChange, options }) {
+        return (
+          <div className="inline-flex rounded-lg overflow-hidden border">
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => onChange(opt.value)}
+                className={\`px-3 py-2 text-sm \${value === opt.value ? "bg-gray-900 text-white" : "bg-white"}\`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        );
+      }
+
+      // ==================================================
+      // Reusable Cards
+      // ==================================================
+      function CriterionCard({ title, status = "met", asOf = "Sep 2025", selectedDistricts = [] }) {
+        const [view, setView] = useState("map"); // map | list
+        const hoverStyle = status === "met"
+          ? "hover:bg-green-50 hover:border-green-300"
+          : "hover:bg-red-50 hover:border-red-300";
+
+        return (
+          <div className={\`border rounded-2xl p-6 transition-colors \${hoverStyle}\`} title={status === "met" ? "Target met" : "Target not met"}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h4 className="text-lg font-semibold">{title}</h4>
+                <div className="text-sm text-gray-500">As of {asOf}</div>
+              </div>
+              <ToggleGroup
+                value={view}
+                onChange={setView}
+                options={[{ value: "map", label: "Map" }, { value: "list", label: "List" }]}
+              />
+            </div>
+
+            {view === "map" ? (
+              <div className="h-48 border rounded-xl flex items-center justify-center text-gray-400">
+                District-level Map (RYG)
+              </div>
+            ) : (
+              <div className="h-48 border rounded-xl overflow-auto text-sm">
+                <div className="grid grid-cols-3 gap-2 font-medium text-gray-600 p-3 border-b bg-gray-50">
+                  <div>Rank</div>
+                  <div>District</div>
+                  <div>Value</div>
+                </div>
+                <div className="divide-y">
+                  {selectedDistricts.slice(0, 10).map((d, i) => (
+                    <div key={d} className="grid grid-cols-3 gap-2 p-3">
+                      <div>{i + 1}</div>
+                      <div>{d}</div>
+                      <div>—</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      function ActivityCard({ title, status = "met", selectedDistricts = [] }) {
+        const [view, setView] = useState("map"); // map | list
+        const hoverStyle = status === "met"
+          ? "hover:bg-green-50 hover:border-green-300"
+          : "hover:bg-red-50 hover:border-red-300";
+
+        return (
+          <div className={\`border rounded-2xl p-6 transition-colors \${hoverStyle}\`}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <div className="text-sm text-gray-500">Activity</div>
+                <h4 className="text-lg font-semibold">{title}</h4>
+              </div>
+              <ToggleGroup
+                value={view}
+                onChange={setView}
+                options={[{ value: "map", label: "Map" }, { value: "list", label: "List" }]}
+              />
+            </div>
+
+            {view === "map" ? (
+              <div className="h-48 border rounded-xl flex items-center justify-center text-gray-400">
+                District-level Map (RG coding)
+              </div>
+            ) : (
+              <div className="h-48 border rounded-xl overflow-auto text-sm">
+                <div className="grid grid-cols-3 gap-2 font-medium text-gray-600 p-3 border-b bg-gray-50">
+                  <div>Rank</div>
+                  <div>District</div>
+                  <div>Count</div>
+                </div>
+                <div className="divide-y">
+                  {selectedDistricts.slice(0, 10).map((d, i) => (
+                    <div key={d} className="grid grid-cols-3 gap-2 p-3">
+                      <div>{i + 1}</div>
+                      <div>{d}</div>
+                      <div>—</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ==================================================
+      // Screens: LOGIN & HOME
+      // ==================================================
+      function Login({ onSuccess }) {
+        const [phone, setPhone] = useState("");
+        const [otpSent, setOtpSent] = useState(false);
+        const [otp, setOtp] = useState("");
+        const [error, setError] = useState("");
+
+        const sendOtp = () => {
+          setError("");
+          if (phone === DEMO_PHONE) {
+            setOtpSent(true);
+          } else {
+            setError("Phone not recognized (use 9811920561)");
+          }
+        };
+
+        const verify = () => {
+          if (otp === DEMO_OTP) onSuccess();
+          else setError("Invalid OTP (use 123456)");
+        };
+
+        return (
+          <div className="min-h-screen bg-white flex items-center justify-center p-6">
+            <div className="w-[480px] border rounded-2xl shadow p-8 bg-white">
+              <h1 className="text-2xl font-bold text-center mb-8">Agriculture DSS Portal</h1>
+              <div className="flex flex-col space-y-4">
+                <input
+                  className="border rounded h-12 px-3"
+                  placeholder="Phone Number (+91)"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
+                <button className="h-12 rounded border bg-white" onClick={sendOtp}>Send OTP</button>
+                {otpSent && (
+                  <>
+                    <input
+                      className="border rounded h-12 px-3"
+                      placeholder="Enter OTP"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                    />
+                    <button className="h-12 rounded bg-gray-900 text-white" onClick={verify}>Verify & Login</button>
+                  </>
+                )}
+                {error && <div className="text-sm text-red-600 text-center">{error}</div>}
+                <div className="text-sm text-gray-500 text-center mt-2">Demo creds — Phone: 9811920561, OTP: 123456</div>
+                <div className="text-sm text-center text-gray-400">Language: EN | MR</div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      function Home({ navigate }) {
+        return (
+          <div className="bg-white min-h-screen p-12">
+            <header className="max-w-[1200px] mx-auto flex justify-between items-center mb-12">
+              <div className="text-xl font-semibold">Agriculture DSS Portal</div>
+              <div className="w-10 h-10 rounded-full bg-gray-300" title="User" />
+            </header>
+
+            <main className="max-w-[1200px] mx-auto">
+              <h2 className="text-2xl font-bold text-center mb-8">Home</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <button className="h-48 border rounded-2xl font-semibold" onClick={() => navigate("scheme_select")}>Scheme Review Dashboard</button>
+                <button className="h-48 border rounded-2xl font-semibold" onClick={() => navigate("activity_select")}>Activity Review Dashboard</button>
+                <button className="h-48 border rounded-2xl font-semibold" onClick={() => navigate("detailed_scheme")}>Detailed Scheme View</button>
+              </div>
+              <div className="text-sm text-center text-gray-500 mt-8">Return to Home | Contact Support</div>
+            </main>
+          </div>
+        );
+      }
+
+      // ==================================================
+      // Screens: SCHEME SELECTION & DASHBOARD
+      // ==================================================
+      function SchemeSelection({ state, setState, navigate }) {
+        const { selectedSchemes, selectedCriteriaByScheme, selectedDistricts } = state;
+        const allDists = selectedDistricts.length === DISTRICTS.length;
+
+        const toggleScheme = (s) => {
+          setState((prev) => {
+            const nextSchemes = prev.selectedSchemes.includes(s)
+              ? prev.selectedSchemes.filter((x) => x !== s)
+              : [...prev.selectedSchemes, s];
+            return { ...prev, selectedSchemes: nextSchemes };
+          });
+        };
+
+        const toggleCriterion = (scheme, crit) => {
+          setState((prev) => {
+            const setForScheme = new Set(prev.selectedCriteriaByScheme[scheme] || []);
+            if (setForScheme.has(crit)) setForScheme.delete(crit); else setForScheme.add(crit);
+            return {
+              ...prev,
+              selectedCriteriaByScheme: { ...prev.selectedCriteriaByScheme, [scheme]: Array.from(setForScheme) },
+            };
+          });
+        };
+
+        const toggleDistrict = (d) => {
+          setState((prev) => {
+            const next = prev.selectedDistricts.includes(d)
+              ? prev.selectedDistricts.filter((x) => x !== d)
+              : [...prev.selectedDistricts, d];
+            return { ...prev, selectedDistricts: next };
+          });
+        };
+
+        const selectAllDistricts = () => setState((p) => ({ ...p, selectedDistricts: allDists ? [] : [...DISTRICTS] }));
+
+        return (
+          <div className="bg-white min-h-screen p-12">
+            <div className="max-w-[1200px] mx-auto flex items-center justify-between mb-8">
+              <button className="text-sm underline" onClick={() => navigate("home")}>← Back to Home</button>
+              <h2 className="text-2xl font-bold">Scheme Review – Component Selection</h2>
+              <div />
+            </div>
+
+            <div className="max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+              <SectionCard title="Schemes">
+                <div className="space-y-3">
+                  {SCHEMES.map((s) => (
+                    <label key={s} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={selectedSchemes.includes(s)} onChange={() => toggleScheme(s)} />
+                      {s}
+                    </label>
+                  ))}
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Review Criteria">
+                <div className="space-y-6">
+                  {selectedSchemes.length === 0 && <div className="text-sm text-gray-500">Select a scheme to see its criteria</div>}
+                  {selectedSchemes.map((scheme) => (
+                    <div key={scheme}>
+                      <div className="font-semibold mb-2">{scheme}</div>
+                      <div className="space-y-2">
+                        {CRITERIA_BY_SCHEME[scheme].map((c) => (
+                          <label key={c} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={(selectedCriteriaByScheme[scheme] || []).includes(c)}
+                              onChange={() => toggleCriterion(scheme, c)}
+                            />
+                            {c}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Districts">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm text-gray-600">Select districts</div>
+                  <button className="h-9 px-3 rounded-lg border bg-white" onClick={selectAllDistricts}>{allDists ? "Clear All" : "Select All"}</button>
+                </div>
+                <div className="grid grid-cols-2 gap-3 max-h-[360px] overflow-y-auto pr-2">
+                  {DISTRICTS.map((d) => (
+                    <label key={d} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={selectedDistricts.includes(d)} onChange={() => toggleDistrict(d)} />
+                      {d}
+                    </label>
+                  ))}
+                </div>
+              </SectionCard>
+            </div>
+
+            <div className="max-w-[1200px] mx-auto flex justify-end mt-8">
+              <button
+                className="h-10 px-4 rounded bg-gray-900 text-white"
+                onClick={() => navigate("scheme_dashboard")}
+              >
+                View Dashboard
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      function SchemeDashboard({ state, navigate }) {
+        const { selectedSchemes, selectedCriteriaByScheme, selectedDistricts } = state;
+        const [fromDate, setFromDate] = useState("");
+        const [toDate, setToDate] = useState("");
+
+        return (
+          <div className="bg-white min-h-screen p-12">
+            <div className="max-w-[1200px] mx-auto flex items-center justify-between mb-8">
+              <button className="text-sm underline" onClick={() => navigate("scheme_select")}>← Back</button>
+              <h2 className="text-2xl font-bold">Scheme Review Dashboard</h2>
+              <button className="text-sm underline" onClick={() => navigate("home")}>Home</button>
+            </div>
+
+            <div className="max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+              <SectionCard title="Timeframe">
+                <div className="space-y-2">
+                  <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="border rounded px-3 py-2 w-full" />
+                  <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="border rounded px-3 py-2 w-full" />
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button className="flex-1 h-9 px-3 rounded-lg border bg-white">Print PDF</button>
+                  <button className="flex-1 h-9 px-3 rounded-lg border bg-white">Export XLSX</button>
+                </div>
+              </SectionCard>
+              <div className="md:col-span-3 flex items-center gap-2 text-sm text-gray-600">
+                <span className="hidden md:inline">Active: </span>
+                {selectedSchemes.length === 0 ? <Chip>None</Chip> : selectedSchemes.map((s) => <Chip key={s}>{s}</Chip>)}
+              </div>
+            </div>
+
+            <div className="max-w-[1200px] mx-auto space-y-10">
+              {selectedSchemes.map((scheme) => {
+                const crits = selectedCriteriaByScheme[scheme] || [];
+                if (crits.length === 0) return null;
+                return (
+                  <section key={scheme}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold">{scheme}</h3>
+                      <div className="text-sm text-gray-500">Criteria: {crits.join(", ")}</div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {crits.map((c) => (
+                        <CriterionCard key={c} title={c} status={STATUS_DEFAULTS[c] || "met"} selectedDistricts={selectedDistricts} />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      // ==================================================
+      // Screens: ACTIVITY SELECTION & DASHBOARD
+      // ==================================================
+      function ActivitySelection({ aState, setAState, navigate }) {
+        const { selectedActivities, selectedDistricts } = aState;
+        const allDists = selectedDistricts.length === DISTRICTS.length;
+        const ACTIVITIES = ["Farmer Field Schools","Demonstrations","Pest Tagging"];
+
+        const toggleActivity = (a) => {
+          setAState((prev) => {
+            const next = prev.selectedActivities.includes(a)
+              ? prev.selectedActivities.filter((x) => x !== a)
+              : [...prev.selectedActivities, a];
+            return { ...prev, selectedActivities: next };
+          });
+        };
+
+        const toggleDistrict = (d) => {
+          setAState((prev) => {
+            const next = prev.selectedDistricts.includes(d)
+              ? prev.selectedDistricts.filter((x) => x !== d)
+              : [...prev.selectedDistricts, d];
+            return { ...prev, selectedDistricts: next };
+          });
+        };
+
+        const bulkDistricts = () => setAState((p) => ({ ...p, selectedDistricts: allDists ? [] : [...DISTRICTS] }));
+
+        return (
+          <div className="bg-white min-h-screen p-12">
+            <div className="max-w-[1200px] mx-auto flex items-center justify-between mb-8">
+              <button className="text-sm underline" onClick={() => navigate("home")}>← Back to Home</button>
+              <h2 className="text-2xl font-bold">Activity Review – Component Selection</h2>
+              <div />
+            </div>
+
+            <div className="max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+              <SectionCard title="Activities">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-sm text-gray-600">Select activities</div>
+                  <button className="h-9 px-3 rounded-lg border bg-white" onClick={() => setAState((p) => ({ ...p, selectedActivities: p.selectedActivities.length === ACTIVITIES.length ? [] : [...ACTIVITIES] }))}>
+                    {selectedActivities.length === ACTIVITIES.length ? "Clear All" : "Select All"}
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {ACTIVITIES.map((a) => (
+                    <label key={a} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={selectedActivities.includes(a)} onChange={() => toggleActivity(a)} />
+                      {a}
+                    </label>
+                  ))}
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Districts" className="md:col-span-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-sm text-gray-600">Select districts</div>
+                  <button className="h-9 px-3 rounded-lg border bg-white" onClick={bulkDistricts}>{allDists ? "Clear All" : "Select All"}</button>
+                </div>
+                <div className="grid grid-cols-3 gap-3 max-h-[420px] overflow-y-auto pr-2">
+                  {DISTRICTS.map((d) => (
+                    <label key={d} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={selectedDistricts.includes(d)} onChange={() => toggleDistrict(d)} />
+                      {d}
+                    </label>
+                  ))}
+                </div>
+              </SectionCard>
+            </div>
+
+            <div className="max-w-[1200px] mx-auto flex justify-end mt-8">
+              <button className="h-10 px-4 rounded bg-gray-900 text-white" onClick={() => navigate("activity_dashboard")}>View Dashboard</button>
+            </div>
+          </div>
+        );
+      }
+
+      function ActivityDashboard({ aState, navigate }) {
+        const { selectedActivities, selectedDistricts } = aState;
+        const [viewMode, setViewMode] = useState("district"); // district | officer
+        const [fromDate, setFromDate] = useState("");
+        const [toDate, setToDate] = useState("");
+        const [officerFilters, setOfficerFilters] = useState([...OFFICER_TYPES]);
+        const [officerDistrictScopeAll, setOfficerDistrictScopeAll] = useState(true);
+        const [officerDistricts, setOfficerDistricts] = useState([...selectedDistricts]);
+        const allOfficers = officerFilters.length === OFFICER_TYPES.length;
+
+        useEffect(() => {
+          if (officerDistrictScopeAll) setOfficerDistricts([...selectedDistricts]);
+        }, [selectedDistricts, officerDistrictScopeAll]);
+
+        const filteredOfficerRows = useMemo(() => {
+          return Array.from({ length: 10 }).map((_, i) => ({
+            name: \`Officer \${i + 1}\`,
+            type: OFFICER_TYPES[i % OFFICER_TYPES.length],
+            district: DISTRICTS[i % DISTRICTS.length],
+            ffs: "—",
+            demo: "—",
+            pest: "—",
+          }))
+            .filter((r) => officerFilters.includes(r.type))
+            .filter((r) => officerDistricts.includes(r.district));
+        }, [officerFilters, officerDistricts]);
+
+        return (
+          <div className="bg-white min-h-screen p-12">
+            <div className="max-w-[1200px] mx-auto flex items-center justify-between mb-8">
+              <button className="text-sm underline" onClick={() => navigate("activity_select")}>← Back</button>
+              <h2 className="text-2xl font-bold">Activity Review Dashboard</h2>
+              <button className="text-sm underline" onClick={() => navigate("home")}>Home</button>
+            </div>
+
+            <div className="max-w-[1200px] mx-auto flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span className="hidden md:inline">Active: </span>
+                {selectedActivities.length === 0 ? <Chip>None selected</Chip> : selectedActivities.map((a) => <Chip key={a}>{a}</Chip>)}
+              </div>
+              <ToggleGroup
+                value={viewMode}
+                onChange={setViewMode}
+                options={[{ value: "district", label: "District-wise" }, { value: "officer", label: "Officer-wise" }]}
+              />
+            </div>
+
+            <div className="max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+              <SectionCard title="Timeframe">
+                <div className="space-y-2">
+                  <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="border rounded px-3 py-2 w-full" />
+                  <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="border rounded px-3 py-2 w-full" />
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button className="flex-1 h-9 px-3 rounded-lg border bg-white">Print PDF</button>
+                  <button className="flex-1 h-9 px-3 rounded-lg border bg-white">Export XLSX</button>
+                </div>
+              </SectionCard>
+              <div className="md:col-span-3 flex items-center text-sm text-gray-500">Use the toggle to switch between District-wise and Officer-wise views.</div>
+            </div>
+
+            {viewMode === "district" ? (
+              <div className="max-w-[1200px] mx-auto space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {selectedActivities.includes("Farmer Field Schools") && (
+                    <ActivityCard title="Farmer Field Schools" status="met" selectedDistricts={selectedDistricts} />
+                  )}
+                  {selectedActivities.includes("Demonstrations") && (
+                    <ActivityCard title="Demonstrations" status="not_met" selectedDistricts={selectedDistricts} />
+                  )}
+                </div>
+                {selectedActivities.includes("Pest Tagging") && (
+                  <ActivityCard title="Pest Tagging" status="met" selectedDistricts={selectedDistricts} />
+                )}
+              </div>
+            ) : (
+              <div className="max-w-[1200px] mx-auto space-y-8">
+                <SectionCard title="Officer Filters">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="text-sm text-gray-600">Filter by officer type</div>
+                    <button
+                      className="h-9 px-3 rounded-lg border bg-white"
+                      onClick={() => setOfficerFilters(allOfficers ? [] : [...OFFICER_TYPES])}
+                    >
+                      {allOfficers ? "Clear All" : "Select All"}
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    {OFFICER_TYPES.map((o) => (
+                      <label key={o} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={officerFilters.includes(o)} onChange={() => setOfficerFilters((prev) => prev.includes(o) ? prev.filter((x) => x !== o) : [...prev, o])} />
+                        {o}
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="mt-6 pt-4 border-t">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-sm text-gray-600">District filter (within selected)</div>
+                      <label className="text-sm flex items-center gap-2">
+                        <input type="checkbox" checked={officerDistrictScopeAll} onChange={(e) => setOfficerDistrictScopeAll(e.target.checked)} />
+                        Use all selected districts
+                      </label>
+                    </div>
+                    {!officerDistrictScopeAll && (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-48 overflow-y-auto pr-2">
+                        {selectedDistricts.map((d) => (
+                          <label key={d} className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={officerDistricts.includes(d)} onChange={() => setOfficerDistricts((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d])} />
+                            {d}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500 mt-2">
+                      {officerDistrictScopeAll ? \`\${selectedDistricts.length} districts included\` : \`\${officerDistricts.length} of \${selectedDistricts.length} districts\`}
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="border rounded-2xl p-6"><div className="text-sm text-gray-600">Farmer Field Schools</div><div className="text-3xl font-bold">—</div><div className="text-xs text-gray-500">Total across filtered officers & districts</div></div>
+                  <div className="border rounded-2xl p-6"><div className="text-sm text-gray-600">Demonstrations</div><div className="text-3xl font-bold">—</div><div className="text-xs text-gray-500">Total across filtered officers & districts</div></div>
+                  <div className="border rounded-2xl p-6"><div className="text-sm text-gray-600">Pest Tagging</div><div className="text-3xl font-bold">—</div><div className="text-xs text-gray-500">Total across filtered officers & districts</div></div>
+                </div>
+
+                <div className="border rounded-2xl">
+                  <div className="px-6 py-4 border-b text-lg font-semibold">Officer-wise Detail</div>
+                  <div className="p-6 overflow-auto">
+                    <div className="grid grid-cols-6 gap-2 font-medium text-gray-600 text-sm pb-2 border-b">
+                      <div>Officer</div>
+                      <div>Type</div>
+                      <div>District</div>
+                      <div>Farmer Field Schools</div>
+                      <div>Demonstrations</div>
+                      <div>Pest Tagging</div>
+                    </div>
+                    {filteredOfficerRows.map((r, i) => (
+                      <div key={i} className="grid grid-cols-6 gap-2 py-2 border-b last:border-0 text-sm">
+                        <div>{r.name}</div>
+                        <div>{r.type}</div>
+                        <div>{r.district}</div>
+                        <div>{r.ffs}</div>
+                        <div>{r.demo}</div>
+                        <div>{r.pest}</div>
+                      </div>
+                    ))}
+                    {filteredOfficerRows.length === 0 && (
+                      <div className="text-sm text-gray-500 py-4">No officers match the current filters.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ==================================================
+      // Screen: DETAILED SCHEME VIEW
+      // ==================================================
+      function DetailedSchemeView({ navigate }) {
+        const [scheme, setScheme] = useState("PoCRA");
+        const [criteria, setCriteria] = useState([...CRITERIA_BY_SCHEME["PoCRA"]]);
+        const [districts, setDistricts] = useState([...DISTRICTS]);
+        const [fromDate, setFromDate] = useState("");
+        const [toDate, setToDate] = useState("");
+
+        useEffect(() => {
+          setCriteria([...CRITERIA_BY_SCHEME[scheme]]);
+        }, [scheme]);
+
+        const toggleCriterion = (c) => setCriteria((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
+        const toggleDistrict = (d) => setDistricts((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
+        const allDists = districts.length === DISTRICTS.length;
+
+        return (
+          <div className="bg-white min-h-screen p-12">
+            <div className="max-w-[1200px] mx-auto flex items-center justify-between mb-8">
+              <button className="text-sm underline" onClick={() => navigate("home")}>← Back to Home</button>
+              <h2 className="text-2xl font-bold">Detailed Scheme View</h2>
+              <div />
+            </div>
+
+            <div className="max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
+              <SectionCard title="Scheme">
+                <select className="border rounded px-3 py-2 w-full" value={scheme} onChange={(e) => setScheme(e.target.value)}>
+                  {SCHEMES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </SectionCard>
+              <SectionCard title="Timeframe">
+                <div className="space-y-2">
+                  <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="border rounded px-3 py-2 w-full" />
+                  <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="border rounded px-3 py-2 w-full" />
+                </div>
+              </SectionCard>
+              <SectionCard title="Criteria">
+                <div className="space-y-2">
+                  {CRITERIA_BY_SCHEME[scheme].map((c) => (
+                    <label key={c} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={criteria.includes(c)} onChange={() => toggleCriterion(c)} />
+                      {c}
+                    </label>
+                  ))}
+                </div>
+              </SectionCard>
+              <SectionCard title="Districts">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm text-gray-600">Select districts</div>
+                  <button className="h-9 px-3 rounded-lg border bg-white" onClick={() => setDistricts(allDists ? [] : [...DISTRICTS])}>
+                    {allDists ? "Clear All" : "Select All"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-2">
+                  {DISTRICTS.map((d) => (
+                    <label key={d} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={districts.includes(d)} onChange={() => toggleDistrict(d)} />
+                      {d}
+                    </label>
+                  ))}
+                </div>
+              </SectionCard>
+            </div>
+
+            {/* KPI Cards + Visualizations */}
+            <div className="max-w-[1200px] mx-auto space-y-8 mt-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {criteria.slice(0, 2).map((c) => (
+                  <CriterionCard key={c} title={c} status={STATUS_DEFAULTS[c] || "met"} selectedDistricts={districts} />
+                ))}
+              </div>
+              {criteria[2] && (
+                <CriterionCard title={criteria[2]} status={STATUS_DEFAULTS[criteria[2]] || "met"} selectedDistricts={districts} />
+              )}
+              <div className="flex gap-2">
+                <button className="h-9 px-3 rounded-lg border bg-white">Print PDF</button>
+                <button className="h-9 px-3 rounded-lg border bg-white">Export XLSX</button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ==================================================
+      // APP (Router)
+      // ==================================================
+      function App() {
+        const [route, setRoute] = useState("login");
+
+        // Shared state for Scheme flow
+        const [schemeState, setSchemeState] = useState({
+          selectedSchemes: ["PoCRA"],
+          selectedCriteriaByScheme: { PoCRA: [...CRITERIA_BY_SCHEME["PoCRA"]] },
+          selectedDistricts: [...DISTRICTS],
+        });
+
+        // Shared state for Activity flow
+        const [activityState, setActivityState] = useState({
+          selectedActivities: ["Farmer Field Schools","Demonstrations","Pest Tagging"],
+          selectedDistricts: [...DISTRICTS],
+        });
+
+        const navigate = (r) => setRoute(r);
+
+        return (
+          <div className="bg-white min-h-screen">
+            {route === "login" && <Login onSuccess={() => setRoute("home")} />}
+            {route === "home" && <Home navigate={navigate} />}
+
+            {route === "scheme_select" && (
+              <SchemeSelection state={schemeState} setState={setSchemeState} navigate={navigate} />
+            )}
+            {route === "scheme_dashboard" && (
+              <SchemeDashboard state={schemeState} navigate={navigate} />
+            )}
+
+            {route === "activity_select" && (
+              <ActivitySelection aState={activityState} setAState={setActivityState} navigate={navigate} />
+            )}
+            {route === "activity_dashboard" && (
+              <ActivityDashboard aState={activityState} navigate={navigate} />
+            )}
+
+            {route === "detailed_scheme" && <DetailedSchemeView navigate={navigate} />}
+          </div>
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
